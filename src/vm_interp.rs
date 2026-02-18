@@ -227,10 +227,6 @@ pub fn execute_vm_interp(syscall_context: SyscallContext) -> Option<SyscallEffec
     let stricter_abi_and_runtime_constraints = invoke_ctx
         .get_feature_set()
         .stricter_abi_and_runtime_constraints;
-    let mask_out_rent_epoch_in_vm_serialization = invoke_ctx
-        .get_feature_set()
-        .mask_out_rent_epoch_in_vm_serialization;
-
     invoke_ctx
         .transaction_context
         .configure_next_instruction_for_tests(program_idx, instr_accounts, instruction_data)
@@ -252,7 +248,6 @@ pub fn execute_vm_interp(syscall_context: SyscallContext) -> Option<SyscallEffec
             &caller_instr_ctx,
             stricter_abi_and_runtime_constraints,
             direct_mapping,
-            mask_out_rent_epoch_in_vm_serialization,
         )
         .expect("invariant violation: serialize_parameters failed");
 
@@ -316,7 +311,7 @@ pub fn execute_vm_interp(syscall_context: SyscallContext) -> Option<SyscallEffec
         MemoryRegion::new_writable_gapped(
             stack.as_slice_mut(),
             ebpf::MM_STACK_START,
-            if !sbpf_version.dynamic_stack_frames() && config.enable_stack_frame_gaps {
+            if sbpf_version.stack_frame_gaps() && config.enable_stack_frame_gaps {
                 config.stack_frame_size as u64
             } else {
                 0

@@ -43,8 +43,10 @@ use solana_svm_log_collector::LogCollector;
 use solana_svm_timings::ExecuteTimings;
 use solana_transaction_context::MAX_INSTRUCTION_DATA_LEN;
 use solana_transaction_context::{
-    transaction_accounts::KeyedAccountSharedData, IndexOfAccount, InstructionAccount,
-    TransactionContext,
+    transaction_accounts::KeyedAccountSharedData,
+    instruction_accounts::InstructionAccount,
+    transaction::TransactionContext,
+    IndexOfAccount,
 };
 
 use crate::utils::err_map::instr_err_to_num;
@@ -719,7 +721,7 @@ fn initialize_program_cache(cache: &mut ProgramCacheForTxBatch, feature_set: &Fe
 fn create_invoke_context_fields(
     input: &mut InstrContext,
 ) -> Option<(
-    TransactionContext<'_>,
+    TransactionContext<'static>,
     SysvarCache,
     ProgramCacheForTxBatch,
     Hash,
@@ -838,6 +840,7 @@ fn create_invoke_context_fields(
         (*rent).clone(),
         compute_budget.max_instruction_stack_depth,
         compute_budget.max_instruction_trace_length,
+        1, // number_of_top_level_instructions
     );
 
     // sigh ... What is this mess?
@@ -911,7 +914,7 @@ fn create_invoke_context_fields(
                 epoch_schedule: &EpochSchedule,
                 reload: bool,
             ) -> Option<Arc<ProgramCacheEntry>> { */
-            if let Some(loaded_program) = program_loader::load_program_with_pubkey(
+            if let Some((loaded_program, _slot)) = program_loader::load_program_with_pubkey(
                 input,
                 &environments,
                 &acc.0,
@@ -1021,8 +1024,9 @@ fn execute_instr(mut input: InstrContext) -> Option<InstrEffects> {
             [instruction_data.as_slice()].into_iter(),
         )
     } else {
+        let mut timings = ExecuteTimings::default();
         invoke_context
-            .process_instruction(&mut compute_units_consumed, &mut ExecuteTimings::default())
+            .process_instruction(&mut compute_units_consumed, &mut timings)
     };
 
     #[cfg(feature = "core-bpf-conformance")]

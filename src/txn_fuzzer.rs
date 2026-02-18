@@ -10,7 +10,7 @@ use prost::Message;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_accounts_db::accounts_db::AccountsDbConfig;
 use solana_accounts_db::accounts_file::StorageAccess;
-use solana_accounts_db::accounts_index::{AccountsIndexConfig, IndexLimitMb};
+use solana_accounts_db::accounts_index::{AccountsIndexConfig, IndexLimit};
 use solana_clock::MAX_PROCESSING_AGE;
 use solana_epoch_schedule::EpochSchedule;
 use solana_genesis_config::GenesisConfig;
@@ -346,7 +346,6 @@ pub fn execute_transaction(context: &TxnContext) -> Option<TxnResult> {
     /* HACK: Add dummy ALUT and config program accounts to genesis config so that their builtin versions don't get added to the program cache */
     let mut genesis_config = GenesisConfig {
         creation_time: 0,
-        rent: rent.clone(),
         epoch_schedule,
         ..GenesisConfig::default()
     };
@@ -371,7 +370,7 @@ pub fn execute_transaction(context: &TxnContext) -> Option<TxnResult> {
     let index = Some(AccountsIndexConfig {
         bins: Some(2),
         num_flush_threads: Some(NonZeroUsize::new(1).unwrap()),
-        index_limit_mb: IndexLimitMb::InMemOnly,
+        index_limit: IndexLimit::InMemOnly,
         ..AccountsIndexConfig::default()
     });
     // create shm path for accountsdb to never touch disk
@@ -383,7 +382,6 @@ pub fn execute_transaction(context: &TxnContext) -> Option<TxnResult> {
         index,
         storage_access: StorageAccess::Mmap,
         skip_initial_hash_calc: true,
-        base_working_path: Some(shm_path),
         ..AccountsDbConfig::default()
     };
     // previously, Block::new_with_paths()
@@ -524,10 +522,12 @@ pub fn execute_transaction(context: &TxnContext) -> Option<TxnResult> {
 
     let configs = TransactionProcessingConfig {
         account_overrides: None,
-        check_program_modification_slot: false,
+        check_program_deployment_slot: false,
         log_messages_bytes_limit: None,
         limit_to_load_programs: true,
         recording_config,
+        drop_on_failure: false,
+        all_or_nothing: false,
     };
 
     let mut metrics = TransactionErrorMetrics::default();

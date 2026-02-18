@@ -10,12 +10,12 @@ use solana_accounts_db::accounts::Accounts;
 use solana_accounts_db::accounts_db::{AccountsDb, AccountsDbConfig};
 use solana_accounts_db::accounts_file::StorageAccess;
 use solana_accounts_db::accounts_hash::AccountsLtHash;
-use solana_accounts_db::accounts_index::{AccountsIndexConfig, IndexLimitMb};
+use solana_accounts_db::accounts_index::{AccountsIndexConfig, IndexLimit};
 use solana_accounts_db::ancestors::AncestorsForSerialization;
 use solana_accounts_db::blockhash_queue::BlockhashQueue;
 use solana_clock::Epoch;
 use solana_cluster_type::ClusterType;
-use solana_entry::entry::{Entry, VerifyRecyclers};
+use solana_entry::entry::Entry;
 use solana_epoch_schedule::EpochSchedule;
 use solana_fee_calculator::FeeRateGovernor;
 use solana_genesis_config::GenesisConfig;
@@ -27,7 +27,7 @@ use solana_ledger::blockstore_processor::{
     confirm_slot_entries, create_thread_pool, ConfirmationProgress, ConfirmationTiming,
 };
 use solana_ledger::leader_schedule_cache::LeaderScheduleCache;
-use solana_ledger::leader_schedule_utils;
+use solana_runtime::leader_schedule_utils;
 use solana_poh_config::PohConfig;
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
@@ -44,7 +44,7 @@ use solana_runtime::rent_collector::RentCollector;
 use solana_runtime::runtime_config::RuntimeConfig;
 use solana_runtime::stake_account;
 use solana_runtime::stake_history::StakeHistory;
-use solana_runtime::stakes::{SerdeStakesToStakeFormat, Stakes};
+use solana_runtime::stakes::{DeserializableStakes, SerdeStakesToStakeFormat, Stakes};
 use solana_sdk_ids::sysvar::stake_history;
 use solana_signature::Signature;
 use solana_stake_interface::state::Delegation;
@@ -52,8 +52,9 @@ use solana_sysvar;
 #[allow(deprecated)]
 use solana_sysvar::recent_blockhashes::RecentBlockhashes;
 use solana_transaction::versioned::VersionedTransaction;
-use solana_vote::vote_account::VoteAccount;
+use solana_vote::vote_account::{VoteAccount, VoteAccountsHashMap};
 use std::collections::HashMap;
+use agave_votor_messages::migration::MigrationStatus;
 use std::ffi::c_int;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -166,7 +167,7 @@ we use the provided votes cache instead of the latest input account states. */
 fn build_prev_stake_delegations(
     vote_accounts: &[proto::VoteAccount],
 ) -> Stakes<stake_account::StakeAccount<Delegation>> {
-    let mut stakes = Stakes::<Delegation>::default();
+    let mut vote_accounts_map = VoteAccountsHashMap::default();
     vote_accounts.iter().for_each(|input_vote_account| {
         let (pubkey, account) = input_vote_account
             .vote_account
@@ -179,19 +180,15 @@ fn build_prev_stake_delegations(
         let account_shared_data = AccountSharedData::from(account);
 
         if let Ok(vote_account) = VoteAccount::try_from(account_shared_data) {
-            stakes.vote_accounts.insert(pubkey, vote_account, || input_vote_account.stake);
+            vote_accounts_map.insert(pubkey, (input_vote_account.stake, vote_account));
         }
     });
 
-    let stake_accounts: Stakes<stake_account::StakeAccount<Delegation>> =
-        Stakes::new(&stakes, |pubkey| {
-            stakes
-                .vote_accounts
-                .get(pubkey)
-                .map(|vote_account| vote_account.account().clone())
-        })
-        .unwrap();
-    stake_accounts
+    Stakes::new_for_tests(
+        0,
+        solana_vote::vote_account::VoteAccounts::from(std::sync::Arc::new(vote_accounts_map)),
+        im::OrdMap::default(),
+    )
 }
 
 fn get_changed_accounts(
@@ -412,7 +409,7 @@ pub fn execute_block(context: BlockContext) -> Option<BlockEffects> {
     let index = Some(AccountsIndexConfig {
         bins: Some(2),
         num_flush_threads: Some(NonZeroUsize::new(1).unwrap()),
-        index_limit_mb: IndexLimitMb::InMemOnly,
+        index_limit: IndexLimit::InMemOnly,
         ..AccountsIndexConfig::default()
     });
     let accounts_db_config = AccountsDbConfig {
@@ -503,7 +500,7 @@ pub fn execute_block(context: BlockContext) -> Option<BlockEffects> {
         slot: current_slot,
         epoch: current_epoch,
         block_height: slot_ctx.block_height,
-        collector_id: Pubkey::default(),
+        leader_id: Pubkey::default(),
         collector_fees: 0,
         fee_rate_governor: FeeRateGovernor::new_derived(
             &FeeRateGovernor {
@@ -524,8 +521,8 @@ pub fn execute_block(context: BlockContext) -> Option<BlockEffects> {
         },
         epoch_schedule,
         inflation: epoch_ctx.inflation.unwrap().into(),
-        stakes: stakes_t,
-        versioned_epoch_stakes: epoch_stakes,
+        stakes: DeserializableStakes::from(stakes_t),
+        versioned_epoch_stakes: vec![],
         is_delta: false,
         accounts_data_len: 0,
         accounts_lt_hash: AccountsLtHash(parent_lthash),
@@ -540,6 +537,7 @@ pub fn execute_block(context: BlockContext) -> Option<BlockEffects> {
         bank_fields,
         None,
         accounts_data_size_initial, // precomputed above
+        epoch_stakes,
         Some(feature_set),
     );
 
@@ -554,7 +552,7 @@ pub fn execute_block(context: BlockContext) -> Option<BlockEffects> {
     let leader = leader_schedule
         .slot_leader_at(current_slot, Some(&bank))
         .unwrap_or_default();
-    bank.set_collector_id_for_tests(leader);
+    bank.set_leader_id_for_tests(leader.id);
 
     /* Have we crossed an epoch boundary? */
     if parent_epoch < current_epoch {
@@ -643,9 +641,9 @@ pub fn execute_block(context: BlockContext) -> Option<BlockEffects> {
         None,
         None,
         None,
-        &VerifyRecyclers::default(),
         None,
-        &PrioritizationFeeCache::new(0u64),
+        Some(&PrioritizationFeeCache::new(0u64)),
+        &MigrationStatus::default(),
     );
 
     no_schedule_bank.freeze();
@@ -687,7 +685,7 @@ pub fn execute_block(context: BlockContext) -> Option<BlockEffects> {
     // We use a fixed seed for reproducibility across implementations.
     let mut schedule_hash = [0u8; 16];
     let schedule_pubkeys: Vec<Pubkey> = (0..slots_in_epoch)
-        .map(|slot_offset| l_sched[slot_offset])
+        .map(|slot_offset| l_sched[slot_offset].id)
         .collect();
 
     let unique_cnt = hash_epoch_leaders(
