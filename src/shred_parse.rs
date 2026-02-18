@@ -3,14 +3,14 @@ use prost::Message;
 use solana_ledger::shred::Shred;
 use std::ffi::c_int;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sol_compat_shred_parse_v1(
     out_ptr: *mut u8,
     out_psz: *mut u64,
     in_ptr: *mut u8,
     in_sz: u64,
 ) -> c_int {
-    let in_slice = std::slice::from_raw_parts(in_ptr, in_sz as usize);
+    let in_slice = unsafe { std::slice::from_raw_parts(in_ptr, in_sz as usize) };
 
     let Ok(binary_shred) = ShredBinary::decode(in_slice) else {
         return 0;
@@ -24,13 +24,14 @@ pub unsafe extern "C" fn sol_compat_shred_parse_v1(
         Err(_) => AcceptsShred { valid: false },
     };
 
-    let out_slice = std::slice::from_raw_parts_mut(out_ptr, (*out_psz) as usize);
+    let out_psz_val = unsafe { *out_psz } as usize;
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_psz_val) };
     let out_bytes = accepts_shred.encode_to_vec();
     if out_bytes.len() > out_slice.len() {
         return 0;
     }
     out_slice[..out_bytes.len()].copy_from_slice(&out_bytes);
-    *out_psz = out_bytes.len() as u64;
+    unsafe { *out_psz = out_bytes.len() as u64 };
 
     1
 }

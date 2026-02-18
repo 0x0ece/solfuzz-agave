@@ -105,7 +105,7 @@ execution (dumped after execution). Please leave disabled
 for fuzzing. */
 const ENABLE_TRACE_DUMP: bool = false;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sol_compat_vm_interp_v1(
     out_ptr: *mut u8,
     out_psz: *mut u64,
@@ -115,7 +115,7 @@ pub unsafe extern "C" fn sol_compat_vm_interp_v1(
     if USE_INTERPRETER {
         eprintln!("WARNING: Using interpreter instead of the JIT. This is not the fuzz default.");
     }
-    let in_slice = std::slice::from_raw_parts(in_ptr, in_sz as usize);
+    let in_slice = unsafe { std::slice::from_raw_parts(in_ptr, in_sz as usize) };
     let Ok(syscall_context) = SyscallContext::decode(in_slice) else {
         return 0;
     };
@@ -123,13 +123,13 @@ pub unsafe extern "C" fn sol_compat_vm_interp_v1(
     let Some(syscall_effects) = execute_vm_interp(syscall_context) else {
         return 0;
     };
-    let out_slice = std::slice::from_raw_parts_mut(out_ptr, (*out_psz) as usize);
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr, (*out_psz) as usize) };
     let out_vec = syscall_effects.encode_to_vec();
     if out_vec.len() > out_slice.len() {
         return 0;
     }
     out_slice[..out_vec.len()].copy_from_slice(&out_vec);
-    *out_psz = out_vec.len() as u64;
+    unsafe { *out_psz = out_vec.len() as u64 };
 
     1
 }

@@ -7,14 +7,14 @@ use solana_sdk_ids::compute_budget;
 use solana_svm_transaction::instruction::SVMInstruction;
 use {prost::Message, std::ffi::c_int};
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sol_compat_pack_compute_budget_v1(
     out_ptr: *mut u8,
     out_psz: *mut u64,
     in_ptr: *mut u8,
     in_sz: u64,
 ) -> c_int {
-    let in_slice = std::slice::from_raw_parts(in_ptr, in_sz as usize);
+    let in_slice = unsafe { std::slice::from_raw_parts(in_ptr, in_sz as usize) };
     let Ok(input) = PackComputeBudgetContext::decode(in_slice) else {
         return 0;
     };
@@ -23,14 +23,14 @@ pub unsafe extern "C" fn sol_compat_pack_compute_budget_v1(
         return 0;
     };
 
-    let out_slice = std::slice::from_raw_parts_mut(out_ptr, *out_psz as usize);
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr, *out_psz as usize) };
     let effects_vec = effects.encode_to_vec();
     if out_slice.len() < effects_vec.len() {
         return 0;
     }
 
     out_slice[..effects_vec.len()].copy_from_slice(&effects_vec);
-    *out_psz = effects_vec.len() as u64;
+    unsafe { *out_psz = effects_vec.len() as u64 };
 
     1
 }

@@ -65,7 +65,7 @@ pub fn load_elf(
     Some(elf_effects)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sol_compat_elf_loader_v1(
     out_ptr: *mut u8,
     out_psz: *mut u64,
@@ -76,7 +76,7 @@ pub unsafe extern "C" fn sol_compat_elf_loader_v1(
         return 0;
     }
 
-    let in_slice = std::slice::from_raw_parts(in_ptr, in_sz as usize);
+    let in_slice = unsafe { std::slice::from_raw_parts(in_ptr, in_sz as usize) };
     let Ok(elf_loader_ctx) = ElfLoaderCtx::decode(in_slice) else {
         return 0;
     };
@@ -89,13 +89,14 @@ pub unsafe extern "C" fn sol_compat_elf_loader_v1(
         return 0;
     };
 
-    let out_slice = std::slice::from_raw_parts_mut(out_ptr, (*out_psz) as usize);
+    let out_psz_val = unsafe { *out_psz } as usize;
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_psz_val) };
     let out_vec = elf_loader_effects.encode_to_vec();
     if out_vec.len() > out_slice.len() {
         return 0;
     }
     out_slice[..out_vec.len()].copy_from_slice(&out_vec);
-    *out_psz = out_vec.len() as u64;
+    unsafe { *out_psz = out_vec.len() as u64 };
     1
 }
 

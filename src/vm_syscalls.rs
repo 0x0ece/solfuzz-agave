@@ -31,14 +31,14 @@ use solana_svm_log_collector::LogCollector;
 use solana_transaction_context::TransactionContext;
 use std::ffi::c_int;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sol_compat_vm_syscall_execute_v1(
     out_ptr: *mut u8,
     out_psz: *mut u64,
     in_ptr: *mut u8,
     in_sz: u64,
 ) -> c_int {
-    let in_slice = std::slice::from_raw_parts(in_ptr, in_sz as usize);
+    let in_slice = unsafe { std::slice::from_raw_parts(in_ptr, in_sz as usize) };
     let Ok(syscall_context) = SyscallContext::decode(in_slice) else {
         return 0;
     };
@@ -46,13 +46,13 @@ pub unsafe extern "C" fn sol_compat_vm_syscall_execute_v1(
     let Some(syscall_effects) = execute_vm_syscall(syscall_context) else {
         return 0;
     };
-    let out_slice = std::slice::from_raw_parts_mut(out_ptr, (*out_psz) as usize);
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr, (*out_psz) as usize) };
     let out_vec = syscall_effects.encode_to_vec();
     if out_vec.len() > out_slice.len() {
         return 0;
     }
     out_slice[..out_vec.len()].copy_from_slice(&out_vec);
-    *out_psz = out_vec.len() as u64;
+    unsafe { *out_psz = out_vec.len() as u64 };
 
     1
 }

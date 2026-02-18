@@ -64,7 +64,7 @@ use std::time::Duration;
 // Firedancer-compatible seed for leader schedule hashing
 const LEADER_SCHEDULE_HASH_SEED: u64 = 0xDEADFACE;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sol_compat_block_execute_v1(
     out_ptr: *mut u8,
     out_psz: *mut u64,
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn sol_compat_block_execute_v1(
     if in_ptr.is_null() || in_sz == 0 {
         return 0;
     }
-    let in_slice = std::slice::from_raw_parts(in_ptr, in_sz as usize);
+    let in_slice = unsafe { std::slice::from_raw_parts(in_ptr, in_sz as usize) };
     let Ok(block_context) = BlockContext::decode(&in_slice[..in_sz as usize]) else {
         return 0;
     };
@@ -83,14 +83,15 @@ pub unsafe extern "C" fn sol_compat_block_execute_v1(
         return 0;
     };
 
-    let out_slice = std::slice::from_raw_parts_mut(out_ptr, (*out_psz) as usize);
+    let out_psz_val = unsafe { *out_psz } as usize;
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_psz_val) };
     let out_vec = block_result.encode_to_vec();
     if out_vec.len() > out_slice.len() {
         return 0;
     }
 
     out_slice[..out_vec.len()].copy_from_slice(&out_vec);
-    *out_psz = out_vec.len() as u64;
+    unsafe { *out_psz = out_vec.len() as u64 };
 
     1
 }
